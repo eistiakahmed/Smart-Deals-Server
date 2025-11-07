@@ -1,7 +1,14 @@
 const express = require('express');
 const cors = require('cors');
+const admin = require('firebase-admin');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const serviceAccount = require('./smart-deals-firebase-adminKey.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -9,6 +16,32 @@ const port = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const logger = (req, res, next) => {
+  console.log('logging info');
+  next();
+};
+
+const verifyFirebaseToken = async (req, res, next) => {
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: 'unauthorized access' });
+  }
+
+  const token = req.headers.authorization.split(' ')[1];
+  if (!token) {
+    return res.status(401).send({ message: 'unauthorized access' });
+  }
+
+  // verify id token
+  try {
+    const userInfo = await admin.auth().verifyIdToken(token);
+    req.token_email = userInfo.email;
+    console.log('after token validation', { userInfo });
+    next();
+  } catch {
+    return res.status(401).send({ message: 'unauthorized access' });
+  }
+};
 
 // MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@smartdb.3iheclp.mongodb.net/?appName=smartDB`;
@@ -100,12 +133,14 @@ async function run() {
        🔹 BIDS ROUTES
     ----------------------------- */
 
-    // ✅ Get bids by email (fixed)
-    app.get('/bids', async (req, res) => {
+    app.get('/bids', logger, verifyFirebaseToken, async (req, res) => {
+      console.log('headers', req);
       const email = req.query.email;
       try {
         if (email) {
-          // Filter only user-specific bids
+          if (email !== req.token_email) {
+            return res.status(403).send({ message: ' Forbidden access' });
+          }
           const result = await bidsCollection
             .find({ buyer_email: email })
             .sort({ bid_price: -1 })
@@ -123,15 +158,19 @@ async function run() {
     });
 
     // Get all bids for a specific product
-    app.get('/product/bids/:productId', async (req, res) => {
-      const productId = req.params.productId;
-      const query = { product: productId };
-      const result = await bidsCollection
-        .find(query)
-        .sort({ bid_price: -1 })
-        .toArray();
-      res.send(result);
-    });
+    app.get(
+      '/product/bids/:productId',
+      verifyFirebaseToken,
+      async (req, res) => {
+        const productId = req.params.productId;
+        const query = { product: productId };
+        const result = await bidsCollection
+          .find(query)
+          .sort({ bid_price: -1 })
+          .toArray();
+        res.send(result);
+      }
+    );
 
     // Add a new bid
     app.post('/bids', async (req, res) => {
@@ -148,12 +187,12 @@ async function run() {
     });
 
     /* -----------------------------
-       ✅ TEST CONNECTION
+        TEST CONNECTION
     ----------------------------- */
     await client.db('admin').command({ ping: 1 });
-    console.log('✅ Successfully connected to MongoDB!');
+    console.log(' Successfully connected to MongoDB!');
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error);
+    console.error(' MongoDB connection failed:', error);
   } finally {
     // await client.close();
   }
@@ -163,5 +202,5 @@ run().catch(console.dir);
 
 // Server listen
 app.listen(port, () => {
-  console.log(`🚀 Smart Deals Server is running on port: ${port}`);
+  console.log(` Smart Deals Server is running on port: ${port}`);
 });
