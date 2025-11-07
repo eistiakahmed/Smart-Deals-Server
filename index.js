@@ -96,7 +96,7 @@ async function run() {
     });
 
     // Add new deal
-    app.post('/deals', async (req, res) => {
+    app.post('/deals', verifyFirebaseToken,async (req, res) => {
       const newProduct = req.body;
       const result = await dealsCollection.insertOne(newProduct);
       res.send(result);
@@ -187,7 +187,7 @@ async function run() {
     });
 
     /* -----------------------------
-        TEST CONNECTION
+       TEST CONNECTION
     ----------------------------- */
     await client.db('admin').command({ ping: 1 });
     console.log(' Successfully connected to MongoDB!');
